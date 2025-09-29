@@ -66,6 +66,7 @@ with left:
                 st.download_button("Download stego.png", data=buf.getvalue(), file_name="stego.png", mime="image/png")
 
 # ---------------- Decode ----------------
+# ---------------- Decode ----------------
 with right:
     st.header("Decode (Recover)")
     stego = st.file_uploader("Stego image", type=["png","jpg","jpeg","bmp"], key="stego_img")
@@ -78,10 +79,23 @@ with right:
             prog = st.progress(0.0)
             raw = extract_bytes_from_image(img, progress_callback=prog.progress)
             try:
+                # Step 1: Unpack header to get info
                 filename, payload, encrypted_flag, tampered, tamper_fraction = unpack_payload(raw)
             except Exception as e:
                 st.error(f"Payload unpack failed: {e}")
             else:
+                # Step 2: Remove ECC if enabled
+                parity_bytes = int(raw[11:13].hex(), 16) if len(raw) >= 13 else 0
+                if parity_bytes > 0:
+                    try:
+                        from steg_utils import remove_ecc
+                        payload, corrected = remove_ecc(payload, parity_bytes)
+                        if corrected > 0:
+                            st.info(f"ECC corrected {corrected} bytes of errors.")
+                    except:
+                        st.warning("ECC removal failed; payload may be corrupted.")
+
+                # Step 3: Decrypt if needed
                 if encrypted_flag:
                     if not pwd:
                         st.error("Password required for decryption.")
@@ -92,6 +106,7 @@ with right:
                         st.error("Decryption failed (wrong password or corrupted).")
                         st.stop()
 
+                # Step 4: Tamper reporting
                 if tampered:
                     if 0 < tamper_fraction < 1:
                         st.warning(f"⚠️ Partial tampering detected (~{tamper_fraction*100:.1f}% of ECC corrected).")
@@ -100,15 +115,14 @@ with right:
                 else:
                     st.success("✅ Data integrity verified (no tampering).")
 
-                # Try to show as text
+                # Step 5: Display text if possible, else binary
                 try:
                     text = payload.decode("utf-8")
                     st.text_area("Recovered message", text, height=240)
-                    st.download_button("Download recovered file", data=payload, file_name=filename)
                 except:
                     st.info("Recovered binary payload")
-                    st.download_button("Download recovered file", data=payload, file_name=filename)
 
+                st.download_button("Download recovered file", data=payload, file_name=filename)
 # ---------------- Sample cover ----------------
 st.write("---")
 st.subheader("Sample cover image")
